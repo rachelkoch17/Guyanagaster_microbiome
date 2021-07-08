@@ -1,0 +1,290 @@
+library(phyloseq)
+library(ggplot2)
+library(vegan)
+library(dplyr)
+library(scales)
+library(grid)
+library(reshape2)
+library(viridis)
+library(tidyverse)
+library(RColorBrewer)
+library(readxl)
+library(DESeq2)
+
+####PHYLOSEQ ANALYSIS FOR GUYANAGASTER MICROBIOME--SETTING UP PHYSEQ OBJECT
+setwd("~/Desktop")
+tax <- as.matrix(read.table("Gn_tax.csv", header=TRUE, sep = ",", row.names = 1, as.is=TRUE, na.strings=c("","NA")))
+TAX = tax_table(tax)
+otu_table <- as.matrix(read.table("Counts_20200714.csv", header=TRUE, sep = ",", row.names = 1, as.is=TRUE))
+OTU = otu_table(otu_table, taxa_are_rows = TRUE)
+samples <- read.table("metadata_Gn.csv", header = T, row.names = 1, check.names = F, sep = ",")
+sampledata = sample_data(samples)
+physeq = phyloseq(OTU, TAX, sampledata)
+
+####SETTING UP THE VARIANCE STABILIZATION TRANSFORMATION FOR ALL SAMPLES (GASTERS AND SOIL)
+diagdds = phyloseq_to_deseq2(physeq, ~ Maturity)
+deseq_counts_vst <- varianceStabilizingTransformation(diagdds, blind = TRUE, fitType = "local")
+vst_trans_count_tab <- assay(deseq_counts_vst)
+X <- vst_trans_count_tab
+X[X < 0.0] <- 0.0
+write.csv(X, "vst_Gn_microbiome.csv")
+vst_count_phy <- otu_table(X, taxa_are_rows=T)
+vst_physeq <- phyloseq(vst_count_phy, TAX, sampledata)
+
+#####BRAY ANALYSIS FOR ALL SAMPLES (GASTERS AND SOIL)
+Gn_bray <- phyloseq::distance(vst_physeq, method = "bray")
+sampledf <- data.frame(sample_data(vst_physeq))
+adonis(Gn_bray ~ Sample, data = sampledf)
+
+####PCA ORDINATION FOR ALL SAMPLES (GASTERS AND SOIL)
+ordination <- ordinate(vst_physeq, method="PCoA", distace = Gn_bray)
+PCAplot <- plot_ordination(vst_physeq, ordination, color = "Maturity") + 
+  theme_classic() +
+  scale_color_manual(values = c("#FBD1BF", "#FA9A73", "#F65A1A", "#B33806", "#3B1101")) +
+  geom_point(aes(color = Maturity), alpha = 0.9, size = 6.5)
+PCAplot
+
+###CAP ORDINATION AND FIGURE FOR ALL SAMPLES (GASTERS AND SOIL)
+gaster.cap.ord <- ordinate(vst_physeq, method="CAP", distance = Gn_bray, formula = ~Maturity)
+gaster.cap.plot <- plot_ordination(vst_physeq, ordination = gaster.cap.ord, color = "Maturity", axes = c(1,2)) +
+  geom_point(aes(color = Maturity), alpha = 0.9, size = 6.5) +
+  scale_color_manual(values = c("#FBD1BF", "#FA9A73", "#F65A1A", "#B33806", "#3B1101")) +
+  theme_classic()
+gaster.cap.plot
+
+arrowmat <- vegan::scores(gaster.cap.ord, display = "bp")
+arrowdf <- data.frame(labels = rownames(arrowmat), arrowmat)
+arrow_map <- aes(xend = CAP1, yend = CAP2, x = 0, y = 0, shape = NULL, color = NULL, label = labels)
+label_map <- aes(x = 1.3 * CAP1, y = 1.3 * CAP2, shape = NULL, color = NULL, label = labels)
+arrowhead = arrow(length = unit(0.02, "npc"))
+
+gaster.cap.plot + geom_segment(mapping = arrow_map, size = 0.5, data = arrowdf, color = "gray", arrow = arrowhead) +
+  geom_text(mapping = label_map, size = 4, data = arrowdf, show.legend = FALSE)
+
+###CAP ORDINATION AND FIGURE FOR JUST GASTERS
+####SUBSETTING OUT JUST THE GASTER SAMPLES
+vst_physeq_justGn <- subset_samples(vst_physeq, Sample=="Gaster")
+
+justGn_bray <- phyloseq::distance(vst_physeq_justGn, method = "bray")
+sampledf_justGn <- data.frame(sample_data(vst_physeq_justGn))
+adonis(justGn_bray ~ Maturity, data = sampledf_justGn)
+
+####PCA ORDINATION FOR JUST GASTERS
+ordination_justGn <- ordinate(vst_physeq_justGn, method="PCoA", distace = justGn_bray)
+PCAplot_Gn <- plot_ordination(vst_physeq_justGn, ordination_justGn, color = "Maturity") + 
+  theme_classic() +
+  scale_color_manual(values = c("#FBD1BF", "#FA9A73", "#F65A1A", "#B33806")) +
+  geom_point(aes(color = Maturity), alpha = 0.9, size = 6.5)
+PCAplot_Gn
+
+###CAP ORDINATION AND FIGURE FOR ALL SAMPLES (GASTERS AND SOIL)
+justgaster.cap.ord <- ordinate(vst_physeq_justGn, method="CAP", distance = justGn_bray, formula = ~Maturity)
+justgaster.cap.plot <- plot_ordination(vst_physeq_justGn, ordination = justgaster.cap.ord, color = "Maturity", axes = c(1,2)) +
+  geom_point(aes(color = Maturity), alpha = 0.9, size = 6.5) +
+  scale_color_manual(values = c("#FBD1BF", "#FA9A73", "#F65A1A", "#B33806")) +
+  theme_classic()
+justgaster.cap.plot
+
+arrowmat <- vegan::scores(justgaster.cap.ord, display = "bp")
+arrowdf <- data.frame(labels = rownames(arrowmat), arrowmat)
+arrow_map <- aes(xend = CAP1, yend = CAP2, x = 0, y = 0, shape = NULL, color = NULL, label = labels)
+label_map <- aes(x = 1.3 * CAP1, y = 1.3 * CAP2, shape = NULL, color = NULL, label = labels)
+arrowhead = arrow(length = unit(0.02, "npc"))
+
+justgaster.cap.plot + geom_segment(mapping = arrow_map, size = 0.5, data = arrowdf, color = "gray", arrow = arrowhead) +
+  geom_text(mapping = label_map, size = 4, data = arrowdf, show.legend = FALSE)
+
+
+###BAR PLOTS FOR EVERY SAMPLE WITH PROPORTION OF KNOWN AND UNKNOWN ENTEROBACTERIACEAE GENERA
+G38X15 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.001708747,	0.998291253,	0))
+df38X15 <- ggplot(G38X15, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G39X8 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.839019859,	0.160980141,	0)) 
+df39X8 <- ggplot(G39X8, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G42X11 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.201598895,	0.798401105,	0))
+df42X11 <- ggplot(G42X11, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G42X13 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.706827444,	0.293172556,	0))
+df42X13 <- ggplot(G42X13, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G44X6 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.784628359,	0.215371641,	0))
+df44X6 <- ggplot(G44X6, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G48X7 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.602509042,	0.367145118,	0.030345841))
+df48X7 <- ggplot(G48X7, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G49X1 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.0545754,	0.9454246,	0))
+df49X1 <- ggplot(G49X1, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G50X1 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.417039785,	0.579548847,	0.003411368))
+df50X1 <- ggplot(G50X1, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G38X11 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.024110848,	0.975889152,	0))
+df38X11 <- ggplot(G38X11, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G42X7 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.129274812,	0.869676001,	0.001049187))
+df42X7 <- ggplot(G42X7, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G44X1 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.159656748,	0.838537505,	0.001805746))
+df44X1 <- ggplot(G44X1, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G45X2 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.663980608,	0.336019392,	0))
+df45X2 <- ggplot(G45X2, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G45X5 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.456687598,	0.543312402,	0))
+df45X5 <- ggplot(G45X2, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G49X10 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.091463686,	0.885625863,	0.022910451))
+df49X10 <- ggplot(G49X10, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G50X2 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.581737039,	0.418262961,	0))
+df50X2 <- ggplot(G50X2, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G50X8 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.522116699,	0.476528337,	0.001354963))
+df50X8 <- ggplot(G50X8, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G38X6 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.138477069,	0.861522931,	0))
+df38X6 <- ggplot(G38X6, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G38X9 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.007670714,	0.992329286,	0))
+df38X9 <- ggplot(G38X9, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G40X1 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.323319506,	0.382532673,	0.294147821))
+df40X1 <- ggplot(G40X1, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G40X2 <- data.frame(group = c("NA", "Known", "Not"), value = c(0,	1,	0))
+df40X2 <- ggplot(G40X2, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G44X7 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.237090388,	0.655168057,	0.107741555))
+df44X7 <- ggplot(G44X7, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G48X2 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.474269583,	0.525730417,	0))
+df48X2 <- ggplot(G48X2, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G49X6 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.330332686,	0.669667314,	0))
+df49X6 <- ggplot(G49X6, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G49X7 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.94195027,	0.054790923,	0.003258807))
+df49X7 <- ggplot(G49X7, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G38X18 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.105819598,	0.88517127,	0.009009133))
+df38X18 <- ggplot(G38X18, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G39X11 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.130515496,	0.856980669,	0.012503836))
+df39X11 <- ggplot(G39X11, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G39X12 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.899992218,	0.089204192,	0.01080359))
+df39X12 <- ggplot(G39X12, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G44X4 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.812986635,	0.186365619,	0.000647745))
+df44X4 <- ggplot(G44X4, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G47X1 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.990588319,	0.00780944,	0.001602241))
+df47X1 <- ggplot(G47X1, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G48X6 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.867856395,	0.12247488,	0.009668725))
+df48X6 <- ggplot(G48X6, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G49X11 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.538455016,	0.461544984,	0))
+df49X11 <- ggplot(G49X11, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+G49X12 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.70915404,	0.242003367,	0.048842593))
+df49X12 <- ggplot(G49X12, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+S38 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.70915404,	0.242003367,	0.048842593))
+dfS38 <- ggplot(S38, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+S39 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.67476468,	0.311429852,	0.013805468))
+dfS39 <- ggplot(S39, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+S40 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.535469796,	0.464530204,	0))
+dfS40 <- ggplot(S40, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+S42 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.233832018,	0.766167982,	0))
+dfS42 <- ggplot(S42, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+S44 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.562374717,	0.218831376,	0.218793908))
+dfS44 <- ggplot(S44, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+S47 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.300033517,	0.592246388, 0.107720095))
+dfS47 <- ggplot(S47, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+S48 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.548748675,	0.420864922,	0.030386403))
+dfS48 <- ggplot(S48, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+S49 <- data.frame(group = c("NA", "Known", "Not"), value = c(0.431671896,	0.462084641, 0.106243463))
+dfS49 <- ggplot(S49, aes(x="", y=value, fill=group)) + 
+  geom_bar(width = 1, stat = "identity")
+
+##Cazyme heatmap
+
+library(RColorBrewer)
+
+###Setting up color palette
+yb<-colorRampPalette(c("#E8F8F5", "#4EA0A0", "#013E3E"))
+
+pal <- yb(256)
+length(pal)
+
+pal
+cazy <- read.csv("Cazymes_new.csv", sep=",")
+cazy
+row.names(cazy) <- cazy$Organism
+cazy <- cazy[,2:38]
+cazy_matrix <- data.matrix(cazy)
+cazy_heatmap <- heatmap(cazy_matrix, Rowv=NA, Colv=NA, col = pal, scale="column", margins=c(5,10))
+
+####Bar chart for number of sporocarps at each maturity collected from 2015 to 2017 
+df <- data.frame(maturity=c("MG I", "MG I", "MG I", "MG II", "MG II", "MG II", "MG III", "MG III", "MG III", "MG IV", "MG IV", "MG IV"), count=c(60, 14, 48, 8, 3, 25, 13, 1, 0, 26, 0, 0), year=c("2015", "2016", "2017", "2015", "2016", "2017", "2015", "2016", "2017", "2015", "2016", "2017"))
+plot <- ggplot(data=df, aes(x=year, y=count, fill=maturity)) +
+  geom_bar(stat="identity", color="black", position=position_dodge()) +
+  scale_fill_manual(values=c("#FBD1BF", "#FA9A73", "#F65A1A", "#B33806")) +
+  theme_classic()
+plot
+
+###Dot plot for stable isotope values
+df <- data.frame(patch=c("G28", "G28", "G28", "G28", "G39", "G39", "G40", "G40", "G40", "G40", "G42", "G42", "G42", "G43", "G43", "G43", "G44", "G44", "G45", "G45", "G45", "G45", "G45"), deltaN=c(-1.1, 2.4, 2.7, 1.8, -1.5, 0.8, 1.5, 1.6, 2.1, 2.2, 1.2, 1.8, 1.9, -2.8, 0.5, 0, 0.8, 4.2, -2.6, -0.3, 0.3, -0.9, 0), sample=c("R", "MG IV", "MG IV", "MG IV", "R", "MG IV", "R", "MG I", "MG II", "MG III", "R", "MG II", "MG II", "R", "MG I", "MG II", "R", "MG I", "R", "MG I", "MG I", "MG II", "MG III"))
+ggplot(df, aes(x=deltaN, y=patch, color=sample)) +
+  geom_pointrange(aes(xmin=deltaN-0.22, xmax=deltaN+0.22)) +
+  scale_color_manual(values=c("#FBD1BF", "#FA9A73", "#F65A1A", "#B33806", "#CD853F")) +
+  theme_classic()
